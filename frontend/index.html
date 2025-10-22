@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Restaurant Management - Register</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="container">
+    <section class="card">
+      <h1>Register an Account</h1>
+      <p class="lead">Create an account to manage your restaurant.</p>
+
+      <form id="registrationForm" novalidate>
+        <div class="grid">
+          <div class="form-group">
+            <label for="firstName">First name</label>
+            <input id="firstName" name="firstName" type="text" required minlength="2" autocomplete="given-name">
+            <span class="error" data-for="firstName"></span>
+          </div>
+
+          <div class="form-group">
+            <label for="lastName">Last name</label>
+            <input id="lastName" name="lastName" type="text" required minlength="2" autocomplete="family-name">
+            <span class="error" data-for="lastName"></span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required autocomplete="email">
+          <span class="error" data-for="email"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="phone">Phone (optional)</label>
+          <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 555 555 0123">
+          <span class="error" data-for="phone"></span>
+        </div>
+
+        <div class="grid">
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
+            <meter id="passwordStrength" min="0" max="4" value="0"></meter>
+            <small class="hint">Use at least 8 characters, include letters and numbers.</small>
+            <span class="error" data-for="password"></span>
+          </div>
+
+          <div class="form-group">
+            <label for="confirmPassword">Confirm password</label>
+            <input id="confirmPassword" name="confirmPassword" type="password" required autocomplete="new-password">
+            <span class="error" data-for="confirmPassword"></span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="restaurantName">Restaurant name</label>
+          <input id="restaurantName" name="restaurantName" type="text" required autocomplete="organization">
+          <span class="error" data-for="restaurantName"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="role">Your role</label>
+          <select id="role" name="role" required>
+            <option value="">Select role</option>
+            <option value="owner">Owner</option>
+            <option value="manager">Manager</option>
+            <option value="staff">Staff</option>
+          </select>
+          <span class="error" data-for="role"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="avatar">Profile photo (optional)</label>
+          <input id="avatar" name="avatar" type="file" accept="image/*">
+          <small class="hint">Max 2 MB. JPG/PNG/GIF</small>
+          <span class="error" data-for="avatar"></span>
+        </div>
+
+        <fieldset class="agreements">
+          <legend>Agreements</legend>
+          <label class="checkbox"><input id="tos" name="tos" type="checkbox" required> I agree to the Terms of Service</label>
+          <label class="checkbox"><input id="newsletter" name="newsletter" type="checkbox"> Send me occasional product updates</label>
+          <span class="error" data-for="tos"></span>
+        </fieldset>
+
+        <div class="actions">
+          <button type="submit" class="btn primary">Create account</button>
+          <button type="button" id="resetBtn" class="btn">Reset</button>
+        </div>
+
+        <p class="muted">Already have an account? <a href="#">Sign in</a></p>
+      </form>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
