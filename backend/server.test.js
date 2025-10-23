@@ -404,10 +404,212 @@ describe('Authentication Endpoints', () => {
 
       expect(logoutResponse.status).toBe(200);
 
-      // Note: In a stateless JWT system, the old token is still technically valid
-      // after logout. In production, implement token blacklisting or use server-side
-      // session management. For now, we verify logout returns 200.
-      // A real implementation would track invalidated tokens.
+      // Verify token is blacklisted: should not access /api/me after logout
+      const meAfterLogout = await request(app)
+        .get('/api/me')
+        .set('Cookie', authCookie);
+      expect(meAfterLogout.status).toBe(401);
+      expect(meAfterLogout.body.error).toContain('revoked');
+    });
+
+    test('should reject login with old token after logout', async () => {
+      // Register and login
+      const email = `blacklist-test-${Date.now()}@test.com`;
+      await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Blacklist',
+          lastName: 'Test',
+          email,
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'staff'
+        });
+
+      const loginResponse = await request(app)
+        .post('/api/login')
+        .send({ email, password: 'TestPass123!' });
+
+      const authCookie = loginResponse.headers['set-cookie'][0];
+
+      // Access /api/me (should work)
+      const meBefore = await request(app)
+        .get('/api/me')
+        .set('Cookie', authCookie);
+      expect(meBefore.status).toBe(200);
+
+      // Logout
+      await request(app)
+        .post('/api/logout')
+        .set('Cookie', authCookie);
+
+      // Try to use old token (should fail - token is blacklisted)
+      const meAfter = await request(app)
+        .get('/api/me')
+        .set('Cookie', authCookie);
+      expect(meAfter.status).toBe(401);
+      expect(meAfter.body.error).toContain('revoked');
+    });
+  });
+
+  describe('Security: Token Blacklist', () => {
+    test('should prevent access with blacklisted token', async () => {
+      // Register and login
+      const email = `token-test-${Date.now()}@test.com`;
+      await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Token',
+          lastName: 'Test',
+          email,
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'manager'
+        });
+
+      const loginResponse = await request(app)
+        .post('/api/login')
+        .send({ email, password: 'TestPass123!' });
+
+      expect(loginResponse.status).toBe(200);
+      const authCookie = loginResponse.headers['set-cookie'][0];
+
+      // Logout (blacklist token)
+      const logoutResponse = await request(app)
+        .post('/api/logout')
+        .set('Cookie', authCookie);
+
+      expect(logoutResponse.status).toBe(200);
+
+      // Token should be rejected
+      const meResponse = await request(app)
+        .get('/api/me')
+        .set('Cookie', authCookie);
+
+      expect(meResponse.status).toBe(401);
+      expect(meResponse.body.error).toContain('revoked');
+    });
+
+    test('should allow multiple logout attempts', async () => {
+      // Register and login
+      const email = `logout-test-${Date.now()}@test.com`;
+      await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Logout',
+          lastName: 'Test',
+          email,
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'staff'
+        });
+
+      const loginResponse = await request(app)
+        .post('/api/login')
+        .send({ email, password: 'TestPass123!' });
+
+      const authCookie = loginResponse.headers['set-cookie'][0];
+
+      // First logout
+      const logout1 = await request(app)
+        .post('/api/logout')
+        .set('Cookie', authCookie);
+      expect(logout1.status).toBe(200);
+
+      // Second logout with same cookie (should still succeed, but token already blacklisted)
+      const logout2 = await request(app)
+        .post('/api/logout')
+        .set('Cookie', authCookie);
+      expect(logout2.status).toBe(200);
+
+      // Token remains blacklisted
+      const meResponse = await request(app)
+        .get('/api/me')
+        .set('Cookie', authCookie);
+      expect(meResponse.status).toBe(401);
+    });
+  });
+
+  describe('Security: Enhanced Password Validation', () => {
+    test('should reject password without uppercase letter', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email: 'lowercase@test.com',
+          password: 'testpass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('uppercase');
+    });
+
+    test('should reject password without lowercase letter', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email: 'uppercase@test.com',
+          password: 'TESTPASS123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('lowercase');
+    });
+
+    test('should reject password without number', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email: 'nonumber@test.com',
+          password: 'TestPass!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('number');
+    });
+
+    test('should reject password without special character', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email: 'nospecial@test.com',
+          password: 'TestPass123',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('special');
+    });
+
+    test('should accept strong password with all requirements', async () => {
+      const email = `strong-pass-${Date.now()}@test.com`;
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email,
+          password: 'SecurePass123!@#',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body).toHaveProperty('id');
     });
   });
 });
