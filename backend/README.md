@@ -6,10 +6,12 @@ Express.js backend for user authentication and registration with JWT-based sessi
 
 - **Secure Authentication**: Bcryptjs password hashing with salt rounds 10
 - **JWT Sessions**: 2-hour expiring tokens with HttpOnly, Secure cookies
-- **Input Validation**: Comprehensive email format and password strength validation
+- **Rate Limiting**: Prevents brute-force attacks (5 reg/IP, 10 login/IP per 15 min)
+- **Input Validation**: Comprehensive email format, password strength, and string sanitization
+- **User Enumeration Prevention**: Unified error messages for invalid credentials
 - **Error Handling**: Proper HTTP status codes and error messages
 - **CORS Support**: Configurable cross-origin requests
-- **Unit Tests**: 15 comprehensive tests covering all endpoints
+- **Unit Tests**: 25 comprehensive tests covering all endpoints and security scenarios
 
 ## Setup
 
@@ -55,11 +57,15 @@ Run all unit tests:
 npm test
 ```
 
-Tests cover:
+Tests cover (25 total):
 - User registration with validation
 - Login with password verification
 - Session retrieval and expiry
 - Logout functionality
+- SQL injection and XSS prevention
+- User enumeration prevention
+- Cookie security flags
+- Complete auth flow integration
 - Error cases (invalid email, short password, duplicate user, etc.)
 
 ## API Endpoints
@@ -83,14 +89,25 @@ See `API.md` for full documentation.
 
 ## Security Features
 
-✅ Bcryptjs password hashing  
+✅ Bcryptjs password hashing (10 rounds)  
 ✅ JWT token expiry (2 hours)  
 ✅ HttpOnly cookies (XSS protection)  
 ✅ SameSite=Strict (CSRF protection)  
 ✅ Secure flag in production (HTTPS only)  
 ✅ Input validation and sanitization  
+✅ Rate limiting (5 reg, 10 login per IP per 15 min)  
+✅ Unified error messages (user enumeration prevention)  
 ✅ Error logging to console  
 ✅ Proper HTTP status codes  
+✅ SQL injection prevention via input validation  
+
+## Rate Limiting
+
+- **Registration**: 5 attempts per IP per 15 minutes
+- **Login**: 10 attempts per IP per 15 minutes (successful logins don't count)
+- **Global**: 100 requests per IP per 15 minutes
+
+Rate limiting is disabled in test mode (`NODE_ENV=test`) to allow comprehensive testing.
 
 ## Development Notes
 
@@ -98,4 +115,15 @@ See `API.md` for full documentation.
 - Passwords: Never stored in plaintext, only bcrypt hashes
 - Sessions: Stored as HttpOnly cookies with JWT tokens
 - User passwords not returned in any API response
+- All sensitive error messages logged to console only, generic messages to client
+
+## Future Improvements
+
+For production deployment:
+- Implement token blacklist/revocation system for logout
+- Use Redis for rate limiting across multiple server instances
+- Add database connection pooling (PostgreSQL/MongoDB)
+- Implement server-side session store
+- Add two-factor authentication (2FA)
+- Implement HTTPS enforcement
 

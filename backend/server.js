@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
 
@@ -22,6 +23,38 @@ app.use(bodyParser.json({limit:'10kb'}));
 app.use(bodyParser.urlencoded({limit:'10kb'}));
 app.use(cookieParser());
 app.use(cors({ origin: process.env.CORS_ORIGIN || true, credentials: true }));
+
+// Rate limiting middleware (disabled in test mode)
+const skipRateLimit = NODE_ENV === 'test';
+
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 registration attempts per IP
+  message: 'Too many registration attempts, please try again later',
+  standardHeaders: false,
+  legacyHeaders: false,
+  skip: () => skipRateLimit,
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 login attempts per IP
+  message: 'Too many login attempts, please try again later',
+  standardHeaders: false,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // Don't count successful logins
+  skip: () => skipRateLimit,
+});
+
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per IP
+  standardHeaders: false,
+  legacyHeaders: false,
+  skip: () => skipRateLimit,
+});
+
+app.use(globalLimiter);
 
 // Validation helpers
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -54,7 +87,7 @@ try{
   console.error('Failed to initialize database:', e.message);
 }
 
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', registerLimiter, async (req, res) => {
   try {
     const { firstName, lastName, email, password, restaurantName, role } = req.body;
     
@@ -109,7 +142,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     
