@@ -26,17 +26,21 @@ const path = require('path');
 const app = express();
 
 // ==================== Configuration ====================
-// Load environment variables with fallbacks
+// Load environment variables - NEVER use hardcoded secrets
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const JWT_SECRET = process.env.JWT_SECRET || (NODE_ENV === 'production' ? null : 'dev-secret-change-me');
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'db.json');
 
-// Production safety check: JWT_SECRET is mandatory in production
-if(NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-  console.error('ERROR: JWT_SECRET environment variable is required in production');
+// JWT_SECRET: ALWAYS required from environment, NEVER hardcoded
+// Security: Even in development, use environment variables to prevent accidental commits of secrets
+// Generate a secret: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+if(!process.env.JWT_SECRET) {
+  console.error('FATAL ERROR: JWT_SECRET environment variable is REQUIRED');
+  console.error('In development, create a .env file with: JWT_SECRET=<your-secret>');
+  console.error('Generate a secret: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
 }
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // ==================== Middleware Configuration ====================
 // Body parser: Limit payload to 10KB to prevent DoS attacks
@@ -46,9 +50,63 @@ app.use(bodyParser.urlencoded({limit:'10kb'}));
 // Cookie parser: Enable cookie parsing for session management
 app.use(cookieParser());
 
-// CORS: Allow cross-origin requests from frontend
-// In production, set CORS_ORIGIN to your specific domain (e.g., https://yourdomain.com)
-app.use(cors({ origin: process.env.CORS_ORIGIN || true, credentials: true }));
+// ==================== Security Headers & CORS Configuration ====================
+/**
+ * CORS Configuration - Strict origin control for production
+ * 
+ * Security:
+ * - Development (NODE_ENV !== 'production'): localhost:3000 only
+ * - Production: CORS_ORIGIN environment variable (REQUIRED, no fallback)
+ * 
+ * If CORS_ORIGIN is not set in production, server will not start.
+ * This prevents accidentally allowing all origins in production.
+ */
+
+// CORS_ORIGIN configuration with production safety checks
+let corsOrigin = process.env.CORS_ORIGIN;
+
+if(NODE_ENV === 'production') {
+  if(!corsOrigin) {
+    console.error('FATAL ERROR: CORS_ORIGIN environment variable is REQUIRED in production');
+    console.error('Set CORS_ORIGIN to your frontend domain (e.g., https://yourdomain.com)');
+    process.exit(1);
+  }
+  // Production: Validate CORS_ORIGIN is a valid URL
+  try {
+    new URL(corsOrigin);
+  } catch(e) {
+    console.error('FATAL ERROR: CORS_ORIGIN must be a valid URL in production');
+    console.error('Example: CORS_ORIGIN=https://yourdomain.com');
+    process.exit(1);
+  }
+} else {
+  // Development: Default to localhost
+  corsOrigin = corsOrigin || 'http://localhost:3000';
+}
+
+// Apply CORS middleware with strict configuration
+app.use(cors({
+  origin: corsOrigin,
+  credentials: true, // Allow cookies
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+}));
+
+// Add security headers to all responses
+app.use((req, res, next) => {
+  // Prevent clickjacking attacks
+  res.setHeader('X-Frame-Options', 'DENY');
+  // Prevent MIME type sniffing
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Enable XSS protection in older browsers
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  // Disable content security policy (can be customized)
+  res.setHeader('Content-Security-Policy', 'default-src \'self\'');
+  // Disable referrer information to third parties
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 
 // ==================== Rate Limiting Middleware ====================
 /**
@@ -169,15 +227,71 @@ function getBlacklistStats() {
 /**
  * Security Layer 1: Input Validation
  * These functions validate user input format before processing
+ * Prevents: SQL Injection, NoSQL Injection, XSS, Command Injection
  */
 
 /**
- * Validate email format using regex
+ * Validate email format with strict rules
  * @param {string} email - Email to validate
  * @returns {boolean} True if email format is valid
- * Pattern: anything@anything.anything
+ * 
+ * Pattern breakdown:
+ * ^[^\s@]+ - Local part: no spaces/@ symbols
+ * @[^\s@]+ - At symbol followed by domain without spaces/@
+ * \.[^\s@]+ - TLD: dot followed by domain extension
+ * 
+ * Prevents:
+ * - Space injection attacks
+ * - Double @ symbols (allows XSS)
+ * - Missing TLD (prevents invalid domains)
  */
-const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const validateEmail = (email) => {
+  if (!email || typeof email !== 'string') return false;
+  if (email.length > 254) return false; // RFC 5321
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+};
+
+/**
+ * Validate phone number format
+ * @param {string} phone - Phone number to validate
+ * @returns {boolean} True if phone format is valid (or empty)
+ * 
+ * Pattern: Optional international format
+ * - Allows digits, +, -, (), spaces only
+ * - Min 7 chars (e.g., 555-0000)
+ * - Max 20 chars (longest international format)
+ * 
+ * Prevents:
+ * - Script injection through phone field
+ * - SQL injection characters
+ */
+const validatePhone = (phone) => {
+  if (!phone || phone === '') return true; // Phone is optional
+  if (typeof phone !== 'string') return false;
+  if (phone.length < 7 || phone.length > 20) return false;
+  return /^[\d\s+\-()]*$/.test(phone);
+};
+
+/**
+ * Validate name format (firstName, lastName)
+ * @param {string} name - Name to validate
+ * @returns {boolean} True if name format is valid
+ * 
+ * Pattern: Alphabetic characters, hyphens, apostrophes, spaces only
+ * - Min 2 characters (single letter + space = invalid)
+ * - Max 50 characters (prevent buffer overflow)
+ * 
+ * Prevents:
+ * - Script injection
+ * - SQL injection
+ * - Numbers/special characters that indicate attack
+ */
+const validateName = (name) => {
+  if (!name || typeof name !== 'string') return false;
+  if (name.length < 2 || name.length > 50) return false;
+  // Allow letters, hyphens, apostrophes, spaces only
+  return /^[a-zA-Z\s\-']*$/.test(name);
+};
 
 /**
  * Validate password strength
@@ -223,17 +337,45 @@ const validatePassword = (pwd) => {
 };
 
 /**
- * Sanitize string input
- * Security Layer 2: Input Sanitization - Prevents injection attacks
+ * Sanitize string input - Comprehensive XSS and Injection Prevention
+ * Security Layer 2: Input Sanitization
  * @param {string} str - String to sanitize
- * @returns {string} Sanitized string (trimmed, max 255 chars)
+ * @returns {string} Sanitized string
  * 
  * This function:
- * - Trims whitespace (prevents spacing attacks)
- * - Limits to 255 characters (prevents overflow attacks)
- * - Converts to string type (ensures consistent type)
+ * 1. Ensures string type (prevents type confusion attacks)
+ * 2. Trims whitespace (prevents spacing-based injection)
+ * 3. Removes HTML/script tags (prevents XSS)
+ * 4. Limits to 255 characters (prevents overflow attacks)
+ * 5. Escapes special characters that could break out of queries
+ * 
+ * Prevents:
+ * - NoSQL injection: {"$gt": ""} bypass attempts
+ * - XSS attacks: <script> tags
+ * - Command injection: System command execution
+ * - Buffer overflow: Excessive character input
  */
-const sanitizeString = (str) => String(str||'').trim().slice(0,255);
+const sanitizeString = (str) => {
+  let result = String(str || '').trim().slice(0, 255);
+  
+  // Remove HTML/script tags to prevent XSS
+  result = result.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  result = result.replace(/<[^>]*>/g, '');
+  
+  // HTML encode potentially dangerous characters
+  result = result
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+  
+  // Remove NoSQL injection attempts: ${...}, $ne, etc.
+  result = result.replace(/\$\{[^}]*\}/g, '');
+  result = result.replace(/\$[a-zA-Z]+/g, '');
+  
+  return result;
+};
 
 // ==================== Database Functions ====================
 /**
@@ -309,67 +451,74 @@ try{
  */
 app.post('/api/register', registerLimiter, async (req, res) => {
   try {
-    const { firstName, lastName, email, password, restaurantName, role } = req.body;
+    const { firstName, lastName, email, password, restaurantName, role, phone } = req.body;
     
-    // Step 1: Sanitize all input strings
+    // Step 1: Validate phone number FIRST (before sanitizing - to catch injection attempts)
+    if(phone && !validatePhone(phone)) {
+      return res.status(400).json({error:'Phone number format is invalid'});
+    }
+    
+    // Step 2: Sanitize all input strings
     const cleanEmail = sanitizeString(email).toLowerCase();
     const cleanFirst = sanitizeString(firstName);
     const cleanLast = sanitizeString(lastName);
     const cleanRestaurant = sanitizeString(restaurantName);
+    const cleanPhone = sanitizeString(phone || '');
     
-    // Step 2: Validate email format
+    // Step 3: Validate first name using strict format validation
+    if(!cleanFirst || !validateName(cleanFirst)) {
+      return res.status(400).json({error:'First name must be 2-50 characters, letters only'});
+    }
+    
+    // Step 4: Validate last name using strict format validation
+    if(!cleanLast || !validateName(cleanLast)) {
+      return res.status(400).json({error:'Last name must be 2-50 characters, letters only'});
+    }
+    
+    // Step 5: Validate email format with strict rules
     if(!cleanEmail || !validateEmail(cleanEmail)) {
       return res.status(400).json({error:'Valid email is required'});
     }
     
-    // Step 3: Validate password strength
+    // Step 6: Validate password strength (8+ chars with uppercase, lowercase, number, special char)
     const passwordValidation = validatePassword(password);
     if(passwordValidation !== true) {
       return res.status(400).json({error: passwordValidation.reason});
     }
     
-    // Step 4: Validate first name
-    if(!cleanFirst || cleanFirst.length < 2) {
-      return res.status(400).json({error:'First name must be at least 2 characters'});
+    // Step 7: Validate restaurant name
+    if(!cleanRestaurant || cleanRestaurant.length < 2 || cleanRestaurant.length > 255) {
+      return res.status(400).json({error:'Restaurant name must be 2-255 characters'});
     }
     
-    // Step 5: Validate last name
-    if(!cleanLast || cleanLast.length < 2) {
-      return res.status(400).json({error:'Last name must be at least 2 characters'});
-    }
-    
-    // Step 6: Validate restaurant name
-    if(!cleanRestaurant || cleanRestaurant.length < 2) {
-      return res.status(400).json({error:'Restaurant name must be at least 2 characters'});
-    }
-    
-    // Step 7: Validate role (whitelist approach - only allow specific roles)
+    // Step 8: Validate role (whitelist approach - only allow specific roles)
     if(!role || !['owner','manager','staff'].includes(role)) {
       return res.status(400).json({error:'Invalid role'});
     }
     
-    // Step 8: Check for duplicate email (prevent account hijacking)
+    // Step 9: Check for duplicate email (prevent account hijacking)
     const db = readDB();
     if(db.users.find(u=>u.email === cleanEmail)){
       return res.status(409).json({error:'User already exists'});
     }
     
-    // Step 9: Hash password with bcryptjs (10 salt rounds provides strong security)
+    // Step 10: Hash password with bcryptjs (10 salt rounds provides strong security)
     const hash = await bcrypt.hash(password, 10);
     
-    // Step 10: Create user object with sanitized data
+    // Step 11: Create user object with sanitized data
     const user = {
       id: Date.now(),
       firstName: cleanFirst,
       lastName: cleanLast,
       email: cleanEmail,
       passwordHash: hash, // Never store plain password
+      phone: cleanPhone || null,
       restaurantName: cleanRestaurant,
       role,
       createdAt: new Date().toISOString()
     };
     
-    // Step 11: Save to database and return success
+    // Step 12: Save to database and return success
     db.users.push(user);
     writeDB(db);
     

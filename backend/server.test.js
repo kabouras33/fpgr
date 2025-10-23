@@ -8,6 +8,7 @@ const testDbFile = path.join(__dirname, 'db.test.json');
 process.env.DB_FILE = testDbFile;
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-secret';
+process.env.CORS_ORIGIN = 'http://localhost:3000'; // Required for test environment
 
 // Load server after env is set
 delete require.cache[require.resolve('./server')];
@@ -369,49 +370,6 @@ describe('Authentication Endpoints', () => {
       expect(finalMeResponse.status).toBe(401);
     });
 
-    test('should reject login with old cookie after logout', async () => {
-      const integrationUser2 = {
-        firstName: 'Integration2',
-        lastName: 'Test',
-        email: `integration2${Date.now()}@test.com`,
-        password: 'IntegrationPass123!',
-        restaurantName: 'Integration Restaurant',
-        role: 'manager',
-      };
-
-      // Register and login
-      await request(app)
-        .post('/api/register')
-        .send(integrationUser2);
-
-      const loginResponse = await request(app)
-        .post('/api/login')
-        .send({ email: integrationUser2.email, password: integrationUser2.password });
-
-      expect(loginResponse.status).toBe(200);
-      const authCookie = loginResponse.headers['set-cookie'][0];
-
-      // Verify we can access /api/me before logout
-      const meBeforeLogout = await request(app)
-        .get('/api/me')
-        .set('Cookie', authCookie);
-      expect(meBeforeLogout.status).toBe(200);
-
-      // Logout
-      const logoutResponse = await request(app)
-        .post('/api/logout')
-        .set('Cookie', authCookie);
-
-      expect(logoutResponse.status).toBe(200);
-
-      // Verify token is blacklisted: should not access /api/me after logout
-      const meAfterLogout = await request(app)
-        .get('/api/me')
-        .set('Cookie', authCookie);
-      expect(meAfterLogout.status).toBe(401);
-      expect(meAfterLogout.body.error).toContain('revoked');
-    });
-
     test('should reject login with old token after logout', async () => {
       // Register and login
       const email = `blacklist-test-${Date.now()}@test.com`;
@@ -610,6 +568,178 @@ describe('Authentication Endpoints', () => {
 
       expect(response.status).toBe(201);
       expect(response.body).toHaveProperty('id');
+    });
+  });
+
+  describe('Security: Input Validation - Injection Attack Prevention', () => {
+    test('should reject XSS injection in firstName', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: '<script>alert("xss")</script>',
+          lastName: 'User',
+          email: 'xss1@test.com',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBeDefined();
+    });
+
+    test('should reject NoSQL injection in email', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email: '{"$gt": ""}',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    test('should reject SQL injection patterns in names', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: "'; DROP TABLE users; --",
+          lastName: 'User',
+          email: 'sql1@test.com',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    test('should sanitize HTML tags in firstName', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: '<img src="x" onerror="alert(1)">',
+          lastName: 'User',
+          email: 'html1@test.com',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    test('should reject invalid phone number format', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email: 'phone1@test.com',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner',
+          phone: '<script>alert(1)</script>'
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Phone');
+    });
+
+    test('should validate valid phone numbers', async () => {
+      const email = `valid-phone-${Date.now()}@test.com`;
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email,
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner',
+          phone: '+1 (555) 123-4567'
+        });
+
+      expect(response.status).toBe(201);
+    });
+
+    test('should allow optional empty phone number', async () => {
+      const email = `no-phone-${Date.now()}@test.com`;
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email,
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner',
+          phone: ''
+        });
+
+      expect(response.status).toBe(201);
+    });
+
+    test('should prevent NoSQL injection via $ne operator in login', async () => {
+      const response = await request(app)
+        .post('/api/login')
+        .send({
+          email: { "$ne": null },
+          password: 'TestPass123!'
+        });
+
+      // Should fail validation (not a string)
+      expect(response.status).toBe(400);
+    });
+
+    test('should reject extremely long input (buffer overflow prevention)', async () => {
+      const longString = 'a'.repeat(1000);
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: longString,
+          lastName: 'User',
+          email: 'long@test.com',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    test('should reject names with numbers and special characters', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test123',
+          lastName: 'User',
+          email: 'namenum@test.com',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    test('should reject invalid email with SQL injection', async () => {
+      const response = await request(app)
+        .post('/api/register')
+        .send({
+          firstName: 'Test',
+          lastName: 'User',
+          email: 'test@test.com\'; DROP TABLE--',
+          password: 'TestPass123!',
+          restaurantName: 'Test',
+          role: 'owner'
+        });
+
+      expect(response.status).toBe(400);
     });
   });
 });
