@@ -34,7 +34,7 @@ password.addEventListener('input', ()=>{
   passwordStrength.value = s;
 });
 
-form.addEventListener('submit', (e)=>{
+form.addEventListener('submit', async (e)=>{
   e.preventDefault();
   clearErrors();
 
@@ -83,27 +83,28 @@ form.addEventListener('submit', (e)=>{
 
   if(!valid) return;
 
-  // Mock save to localStorage
-  const users = JSON.parse(localStorage.getItem('rm_users') || '[]');
-  const user = {
-    id: Date.now(),
-    firstName: values.firstName,
-    lastName: values.lastName,
-    email: values.email,
-    phone: values.phone || null,
-    restaurantName: values.restaurantName,
-    role: values.role,
-    newsletter: document.getElementById('newsletter').checked,
-    createdAt: new Date().toISOString()
-  };
-
-  users.push(user);
-  localStorage.setItem('rm_users', JSON.stringify(users));
-
-  // Show success message
-  alert('Account created (mock). You can inspect localStorage key: rm_users');
-  form.reset();
-  passwordStrength.value = 0;
+  // Send to backend
+  try{
+    const payload = {
+      firstName: values.firstName,
+      lastName: values.lastName,
+      email: values.email,
+      password: values.password,
+      restaurantName: values.restaurantName,
+      role: values.role
+    };
+    const res = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload), credentials: 'include' });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({error:'Registration failed'}));
+      showError('email', err.error || 'Registration failed');
+      return;
+    }
+    alert('Account created. You can now sign in.');
+    form.reset();
+    passwordStrength.value = 0;
+  }catch(err){
+    showError('email','Network error');
+  }
 });
 
 resetBtn.addEventListener('click', ()=>{

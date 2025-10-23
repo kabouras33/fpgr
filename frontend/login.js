@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }
   function clearErrors(){ document.querySelectorAll('.error').forEach(e=>e.textContent=''); }
 
-  form.addEventListener('submit', (e)=>{
+  form.addEventListener('submit', async (e)=>{
     e.preventDefault(); clearErrors();
     const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
@@ -15,14 +15,22 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(!password){ showError('password','Enter your password'); valid=false; }
     if(!valid) return;
 
-    const users = JSON.parse(localStorage.getItem('rm_users') || '[]');
-    const found = users.find(u=>u.email.toLowerCase()===email.toLowerCase());
-    if(!found){ showError('email','No account found for this email'); return; }
-
-    // This is a mock: we don't store passwords. Accept any password for matched email.
-    const session = { userId: found.id, email: found.email, createdAt: new Date().toISOString() };
-    localStorage.setItem('rm_session', JSON.stringify(session));
-    // redirect to a placeholder dashboard
-    window.location.href = 'dashboard.html';
+    try{
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, password })
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({error:'Login failed'}));
+        showError('email', err.error || 'Login failed');
+        return;
+      }
+      // success — server sets HttpOnly cookie
+      window.location.href = 'dashboard.html';
+    }catch(err){
+      showError('email','Network error');
+    }
   });
 });
