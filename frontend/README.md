@@ -1,6 +1,6 @@
 Restaurant Management - Frontend Registration Form
 
-Files1:
+Files:
 - index.html - registration form HTML
 - styles.css - styling
 - script.js - client-side validation and mock save to localStorage
