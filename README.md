@@ -1,6 +1,6 @@
 # Restaurant Management System
 
-A full-stack web application for managing restaurant operations with user authentication, registration, and role-based access control.
+A full-stack web application for managing restaurant operations with user authentication, registration, and role-based access control
 
 ## Project Structure
 
