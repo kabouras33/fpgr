@@ -16,24 +16,65 @@
       <h1>Sign in</h1>
       <p class="lead">Use your account to manage your restaurant.</p>
 
+      <!-- Success Message (initially hidden) -->
+      <div id="successMessage" class="success-message" style="display: none;">
+        <p>✓ Login successful. Redirecting...</p>
+      </div>
+
+      <!-- Error Alert (initially hidden) -->
+      <div id="generalError" class="alert alert-error" style="display: none;"></div>
+
       <form id="loginForm" novalidate>
         <div class="form-group">
-          <label for="email">Email</label>
-          <input id="email" name="email" type="email" required autocomplete="email">
-          <span class="error" data-for="email"></span>
+          <label for="email">Email Address</label>
+          <input 
+            id="email" 
+            name="email" 
+            type="email" 
+            required 
+            autocomplete="email"
+            placeholder="you@example.com"
+            aria-describedby="email-error"
+          >
+          <span id="email-error" class="error" data-for="email" role="alert"></span>
         </div>
 
         <div class="form-group">
           <label for="password">Password</label>
-          <input id="password" name="password" type="password" required autocomplete="current-password">
-          <span class="error" data-for="password"></span>
+          <input 
+            id="password" 
+            name="password" 
+            type="password" 
+            required 
+            autocomplete="current-password"
+            placeholder="Enter your password"
+            aria-describedby="password-error"
+          >
+          <span id="password-error" class="error" data-for="password" role="alert"></span>
+        </div>
+
+        <!-- Remember Me Checkbox -->
+        <div class="form-group">
+          <label class="checkbox">
+            <input type="checkbox" name="remember" id="remember">
+            Keep me signed in
+          </label>
         </div>
 
         <div class="actions">
-          <button type="submit" class="btn primary">Sign in</button>
+          <button 
+            id="submitBtn"
+            type="submit" 
+            class="btn primary"
+            aria-label="Sign in to your account"
+          >
+            <span class="btn-text">Sign in</span>
+            <span id="loadingSpinner" class="spinner" style="display: none;"></span>
+          </button>
         </div>
 
-        <p class="muted">No account? <a href="index.html">Register</a></p>
+        <p class="muted">No account? <a href="index.html">Create one</a></p>
+        <p class="muted"><a href="javascript:void(0)" id="forgotPassword" onclick="alert('Password recovery coming soon')">Forgot password?</a></p>
       </form>
     </section>
   </main>
