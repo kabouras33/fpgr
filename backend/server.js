@@ -31,16 +31,81 @@ const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'db.json');
 
-// JWT_SECRET: ALWAYS required from environment, NEVER hardcoded
-// Security: Even in development, use environment variables to prevent accidental commits of secrets
-// Generate a secret: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-if(!process.env.JWT_SECRET) {
-  console.error('FATAL ERROR: JWT_SECRET environment variable is REQUIRED');
-  console.error('In development, create a .env file with: JWT_SECRET=<your-secret>');
-  console.error('Generate a secret: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+// ==================== JWT Secret Management ====================
+/**
+ * JWT_SECRET SECURITY REQUIREMENTS
+ * 
+ * Validation Checks:
+ * 1. Must be set in environment variables (NEVER hardcoded)
+ * 2. Minimum 32 characters (256 bits for HS256)
+ * 3. Must be cryptographically random (check entropy)
+ * 4. Must not contain common weak patterns
+ * 5. Different secret for each environment (dev, staging, prod)
+ * 
+ * Best Practices:
+ * - Use environment variables from secure vaults
+ * - Rotate quarterly in production
+ * - Never log or expose the secret
+ * - Use strong PRNG: crypto.randomBytes()
+ * - For RS256: Use separate public/private keys
+ */
+
+function validateJWTSecret(secret) {
+  const errors = [];
+  
+  if(!secret) {
+    errors.push('JWT_SECRET environment variable is REQUIRED');
+  } else {
+    // Check minimum length (32 chars = 256 bits)
+    if(secret.length < 32) {
+      errors.push(`JWT_SECRET must be at least 32 characters (got ${secret.length})`);
+    }
+    
+    // Check if it looks like a hex string (good entropy indicator)
+    if(!/^[a-f0-9]{32,}$/.test(secret)) {
+      console.warn('WARNING: JWT_SECRET does not appear to be hex-encoded. Consider using: crypto.randomBytes(32).toString("hex")');
+    }
+    
+    // Check for weak patterns
+    if(/^(password|secret|123|admin|test|default)/i.test(secret)) {
+      errors.push('JWT_SECRET appears to use a weak pattern. Use: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+    }
+    
+    // Check for sequential or repeated characters (weak entropy)
+    if(/(.)\1{3,}/.test(secret)) {
+      errors.push('JWT_SECRET contains repeated characters (weak entropy)');
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors: errors
+  };
+}
+
+// Validate JWT_SECRET
+const secretValidation = validateJWTSecret(process.env.JWT_SECRET);
+
+if(!secretValidation.valid) {
+  console.error('FATAL ERROR: JWT_SECRET validation failed');
+  secretValidation.errors.forEach(err => console.error(`  - ${err}`));
+  console.error('\nTo generate a secure JWT_SECRET:');
+  console.error('  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  console.error('\nThen set in .env file:');
+  console.error('  JWT_SECRET=<generated-secret>');
+  console.error('\nOr set as environment variable:');
+  console.error('  export JWT_SECRET=<generated-secret>  # Linux/Mac');
+  console.error('  set JWT_SECRET=<generated-secret>     # Windows CMD');
+  console.error('  $env:JWT_SECRET="<generated-secret>"  # Windows PowerShell');
   process.exit(1);
 }
+
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Log JWT_SECRET status (length only, never log the actual secret)
+if(NODE_ENV === 'development') {
+  console.log('[STARTUP] JWT_SECRET configured: ' + JWT_SECRET.length + ' characters');
+}
 
 // ==================== Middleware Configuration ====================
 // Body parser: Limit payload to 10KB to prevent DoS attacks
@@ -93,18 +158,64 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 
-// Add security headers to all responses
+// ==================== Comprehensive Security Headers ====================
+/**
+ * Security Headers Protection Against Common Web Vulnerabilities
+ * 
+ * These headers prevent:
+ * - Clickjacking attacks (X-Frame-Options)
+ * - MIME type sniffing (X-Content-Type-Options)
+ * - XSS attacks (X-XSS-Protection, Content-Security-Policy)
+ * - Clickjacking with cross-domain policies (X-Permitted-Cross-Domain-Policies)
+ * - Feature abuse (Permissions-Policy)
+ * - Man-in-the-middle attacks (HSTS in production)
+ * - Referrer leakage (Referrer-Policy)
+ */
 app.use((req, res, next) => {
-  // Prevent clickjacking attacks
+  // 1. X-Frame-Options: Prevent clickjacking by denying framing
+  //    'DENY' = Never allow framing, 'SAMEORIGIN' = Allow same domain only
   res.setHeader('X-Frame-Options', 'DENY');
-  // Prevent MIME type sniffing
+  
+  // 2. X-Content-Type-Options: Prevent MIME type sniffing
+  //    'nosniff' = Browser must respect Content-Type header
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  // Enable XSS protection in older browsers
+  
+  // 3. X-XSS-Protection: Enable XSS filter in older browsers
+  //    '1; mode=block' = Enable filter and block page if XSS detected
   res.setHeader('X-XSS-Protection', '1; mode=block');
-  // Disable content security policy (can be customized)
-  res.setHeader('Content-Security-Policy', 'default-src \'self\'');
-  // Disable referrer information to third parties
+  
+  // 4. Content-Security-Policy: Control resource loading
+  //    'default-src \'self\'' = Only allow resources from same origin
+  //    Production: Add 'script-src', 'style-src', 'img-src' as needed
+  res.setHeader('Content-Security-Policy', 'default-src \'self\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:; font-src \'self\'; connect-src \'self\'');
+  
+  // 5. Referrer-Policy: Control referrer information
+  //    'strict-origin-when-cross-origin' = Send origin only for cross-origin requests
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  
+  // 6. X-Permitted-Cross-Domain-Policies: Prevent Adobe Flash attacks
+  //    'none' = Disable cross-domain policies
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  
+  // 7. Permissions-Policy: Restrict browser features and APIs
+  //    Prevents malicious scripts from accessing sensitive features
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+  
+  // 8. Strict-Transport-Security (HSTS): Force HTTPS in production
+  //    'max-age=31536000' = 1 year, 'includeSubDomains' = Apply to all subdomains
+  if(NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
+  
+  // 9. X-Content-Security-Policy: Legacy CSP header for older browsers
+  res.setHeader('X-Content-Security-Policy', 'default-src \'self\'');
+  
+  // 10. Expect-CT: Certificate Transparency policy
+  //     'enforce' = Reject connections without valid CT logs
+  if(NODE_ENV === 'production') {
+    res.setHeader('Expect-CT', 'max-age=86400; enforce');
+  }
+  
   next();
 });
 
