@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard — Restaurant Management</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>.center-card{max-width:720px;margin:40px auto}</style>
+</head>
+<body>
+  <main class="container">
+    <section class="card center-card">
+      <h1>Dashboard</h1>
+      <div id="content"></div>
+      <div style="margin-top:18px"><button id="logout" class="btn">Sign out</button></div>
+    </section>
+  </main>
+  <script>
+    const content = document.getElementById('content');
+    const session = JSON.parse(localStorage.getItem('rm_session') || 'null');
+    if(!session){
+      window.location.href = 'login.html';
+    } else {
+      content.innerHTML = `<p>Signed in as <strong>${session.email}</strong></p><p>Session created: ${new Date(session.createdAt).toLocaleString()}</p>`;
+    }
+    document.getElementById('logout').addEventListener('click', ()=>{ localStorage.removeItem('rm_session'); window.location.href='login.html'; });
+  </script>
+</body>
+</html>
