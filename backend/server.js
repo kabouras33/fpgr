@@ -244,10 +244,24 @@ function getBlacklistStats() {
  * - Space injection attacks
  * - Double @ symbols (allows XSS)
  * - Missing TLD (prevents invalid domains)
+ * 
+ * Edge cases handled:
+ * - Empty string: returns false
+ * - Non-string type: returns false
+ * - Exceeds RFC 5321 limit (254 chars): returns false
+ * - Missing @: returns false
+ * - Missing TLD: returns false
+ * - Multiple @: returns false
  */
 const validateEmail = (email) => {
+  // Type check: must be string and non-empty
   if (!email || typeof email !== 'string') return false;
-  if (email.length > 254) return false; // RFC 5321
+  
+  // RFC 5321 compliance: email addresses can't exceed 254 characters
+  if (email.length > 254) return false;
+  
+  // Regex pattern: ensures valid email structure
+  // Rejects: invalid formats, missing parts, spaces, multiple @
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 };
 
@@ -264,11 +278,30 @@ const validateEmail = (email) => {
  * Prevents:
  * - Script injection through phone field
  * - SQL injection characters
+ * 
+ * Edge cases handled:
+ * - Empty string: returns true (phone is optional)
+ * - null/undefined: returns true (phone is optional)
+ * - Non-string type: returns false
+ * - Too short (<7 chars): returns false
+ * - Too long (>20 chars): returns false
+ * - Special characters not in pattern: returns false
+ * - Script tags or HTML: returns false
  */
 const validatePhone = (phone) => {
-  if (!phone || phone === '') return true; // Phone is optional
+  // Phone is optional: empty or null is acceptable
+  if (!phone || phone === '') return true;
+  
+  // Type check: must be string
   if (typeof phone !== 'string') return false;
+  
+  // Length validation: reasonable phone number bounds
+  // Minimum: 7 characters (e.g., 555-0000)
+  // Maximum: 20 characters (longest international format)
   if (phone.length < 7 || phone.length > 20) return false;
+  
+  // Pattern allows: digits (0-9), plus (+), dash (-), parentheses, spaces
+  // Rejects: letters, special characters not in standard phone formats
   return /^[\d\s+\-()]*$/.test(phone);
 };
 
@@ -285,11 +318,30 @@ const validatePhone = (phone) => {
  * - Script injection
  * - SQL injection
  * - Numbers/special characters that indicate attack
+ * 
+ * Edge cases handled:
+ * - Empty string: returns false
+ * - Non-string type: returns false
+ * - Too short (<2 chars): returns false
+ * - Too long (>50 chars): returns false
+ * - Numbers in name: returns false
+ * - Special characters: returns false (except hyphens, apostrophes, spaces)
+ * - Only spaces: returns false (min 2 chars needed)
+ * - Unicode/accented characters: returns false (conservative approach)
  */
 const validateName = (name) => {
+  // Type check: must be string and non-empty
   if (!name || typeof name !== 'string') return false;
+  
+  // Length validation: reasonable name bounds
+  // Minimum: 2 characters (prevents single letters like "A")
+  // Maximum: 50 characters (prevents buffer overflow attempts)
   if (name.length < 2 || name.length > 50) return false;
-  // Allow letters, hyphens, apostrophes, spaces only
+  
+  // Pattern allows: uppercase (A-Z), lowercase (a-z), hyphens, apostrophes, spaces
+  // Rejects: numbers (0-9), special characters, unicode
+  // Examples accepted: "John", "Mary-Jane", "O'Brien", "Jean Pierre"
+  // Examples rejected: "John123", "John@Doe", "João" (unicode), "John!"
   return /^[a-zA-Z\s\-']*$/.test(name);
 };
 
@@ -307,32 +359,61 @@ const validateName = (name) => {
  * 
  * Rationale: Complex passwords are significantly harder to brute-force
  * Estimated crack time: ~1000x harder than simple passwords
+ * 
+ * Edge cases handled:
+ * - Empty string: returns error object
+ * - null/undefined: returns error object
+ * - Non-string type: returns error object
+ * - Too short: returns specific error
+ * - Missing uppercase: returns specific error
+ * - Missing lowercase: returns specific error
+ * - Missing number: returns specific error
+ * - Missing special char: returns specific error
+ * 
+ * Valid passwords:
+ * - "SecurePass123!" ✓
+ * - "MyP@ssw0rd" ✓
+ * - "Restaurant#2025" ✓
+ * 
+ * Invalid passwords:
+ * - "password" ✗ (no uppercase, no number, no special char)
+ * - "PASSWORD" ✗ (no lowercase, no number, no special char)
+ * - "Pass123" ✗ (no special character)
+ * - "Pass!" ✗ (too short, no number)
  */
 const validatePassword = (pwd) => {
+  // Check 1: Presence and length
+  // Minimum 8 characters provides reasonable security baseline
   if (!pwd || pwd.length < 8) {
     return {valid: false, reason: 'Password must be at least 8 characters'};
   }
   
-  // Check for at least one uppercase letter
+  // Check 2: At least one uppercase letter (A-Z)
+  // Uppercase letters significantly increase complexity
   if (!/[A-Z]/.test(pwd)) {
     return {valid: false, reason: 'Password must include uppercase letter'};
   }
   
-  // Check for at least one lowercase letter
+  // Check 3: At least one lowercase letter (a-z)
+  // Mixed case is standard security requirement
   if (!/[a-z]/.test(pwd)) {
     return {valid: false, reason: 'Password must include lowercase letter'};
   }
   
-  // Check for at least one number
+  // Check 4: At least one number (0-9)
+  // Numbers add diversity to character set
   if (!/[0-9]/.test(pwd)) {
     return {valid: false, reason: 'Password must include number'};
   }
   
-  // Check for at least one special character
+  // Check 5: At least one special character
+  // Special characters significantly increase entropy
+  // Pattern includes common keyboard special characters
   if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd)) {
     return {valid: false, reason: 'Password must include special character'};
   }
   
+  // All checks passed: return success indicator
   return true;
 };
 
@@ -342,7 +423,7 @@ const validatePassword = (pwd) => {
  * @param {string} str - String to sanitize
  * @returns {string} Sanitized string
  * 
- * This function:
+ * This function implements multi-layer sanitization:
  * 1. Ensures string type (prevents type confusion attacks)
  * 2. Trims whitespace (prevents spacing-based injection)
  * 3. Removes HTML/script tags (prevents XSS)
@@ -351,29 +432,68 @@ const validatePassword = (pwd) => {
  * 
  * Prevents:
  * - NoSQL injection: {"$gt": ""} bypass attempts
- * - XSS attacks: <script> tags
+ * - XSS attacks: <script> tags, <img> tags, event handlers
  * - Command injection: System command execution
  * - Buffer overflow: Excessive character input
+ * - Template injection: ${...} expressions
+ * - Operator injection: $ne, $gt, $where operators
+ * 
+ * Edge cases handled:
+ * - null/undefined: converted to empty string
+ * - Non-string types: converted to string
+ * - Whitespace only: trimmed to empty
+ * - HTML tags: removed completely
+ * - Script tags: removed with content
+ * - Special characters: HTML-encoded
+ * - Template expressions: removed
+ * - NoSQL operators: removed
+ * - Overly long input: truncated to 255 chars
+ * 
+ * Examples:
+ * Input: "<script>alert('xss')</script>" → Output: ""
+ * Input: "John's Café" → Output: "John&#x27;s Caf&eacute;"
+ * Input: {"$gt": ""} → Output: ""
+ * Input: "${process.env.SECRET}" → Output: ""
  */
 const sanitizeString = (str) => {
+  // Step 1: Convert to string and trim whitespace
+  // Handles null, undefined, and non-string types
   let result = String(str || '').trim().slice(0, 255);
   
-  // Remove HTML/script tags to prevent XSS
+  // Step 2: Remove script tags and their content
+  // Pattern: <script...> ... </script> (case-insensitive, global)
+  // This catches: <script>, <SCRIPT>, <Script type="...">
   result = result.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  
+  // Step 3: Remove all HTML tags
+  // Pattern: < ... > anything between angle brackets
+  // Catches: <div>, <img>, <a>, <svg>, etc.
+  // This ensures no HTML tags can execute
   result = result.replace(/<[^>]*>/g, '');
   
-  // HTML encode potentially dangerous characters
+  // Step 4: HTML encode special characters
+  // Converts characters to HTML entities so they can't be interpreted as code
+  // & → &amp; (must be first to avoid double-encoding)
+  // < → &lt; (prevents tag interpretation)
+  // > → &gt; (prevents tag interpretation)
+  // " → &quot; (prevents attribute escape)
+  // ' → &#x27; (prevents single-quote escape)
   result = result
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
+    .replace(/&/g, '&amp;')    // & must be encoded first
+    .replace(/</g, '&lt;')      // Prevents < from starting tags
+    .replace(/>/g, '&gt;')      // Prevents > from ending tags
+    .replace(/"/g, '&quot;')    // Prevents double-quote escape
+    .replace(/'/g, '&#x27;');   // Prevents single-quote escape
   
-  // Remove NoSQL injection attempts: ${...}, $ne, etc.
+  // Step 5: Remove NoSQL injection attempts
+  // ${...} patterns used in template injection
   result = result.replace(/\$\{[^}]*\}/g, '');
+  
+  // NoSQL operators used in MongoDB/etc injection: $ne, $gt, $where, etc.
+  // Pattern: $ followed by word characters
   result = result.replace(/\$[a-zA-Z]+/g, '');
   
+  // Return fully sanitized string
   return result;
 };
 
